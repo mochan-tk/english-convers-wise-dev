@@ -1,5 +1,4 @@
 import { useState, useRef, useEffect } from 'react'
-import { useKV } from '@github/spark/hooks'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -25,15 +24,15 @@ interface Explanation {
 }
 
 function App() {
-  const [messages, setMessages] = useKV<Message[]>('chat-messages', [])
-  const [explanations, setExplanations] = useKV<Explanation[]>('explanations', [])
+  const [messages, setMessages] = useState<Message[]>([])
+  const [explanations, setExplanations] = useState<Explanation[]>([])
   const [currentInput, setCurrentInput] = useState('')
   const [isRecording, setIsRecording] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [hasStarted, setHasStarted] = useState(false)
   const [isExplanationOpen, setIsExplanationOpen] = useState(false)
   const scrollAreaRef = useRef<HTMLDivElement>(null)
-  const recognitionRef = useRef<SpeechRecognition | null>(null)
+  const recognitionRef = useRef<any>(null)
   const isMobile = useIsMobile()
 
   useEffect(() => {
@@ -50,13 +49,13 @@ function App() {
 
   const initSpeechRecognition = () => {
     if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
       const recognition = new SpeechRecognition()
       recognition.lang = 'en-US'
       recognition.continuous = false
       recognition.interimResults = false
 
-      recognition.onresult = (event) => {
+      recognition.onresult = (event: any) => {
         const transcript = event.results[0][0].transcript
         setCurrentInput(transcript)
         setIsRecording(false)
@@ -94,6 +93,26 @@ function App() {
     }
   }
 
+  const callOpenAI = async (messages: any[], parseJSON = false) => {
+    const response = await fetch('/api/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        messages,
+        parseJSON
+      }),
+    })
+
+    if (!response.ok) {
+      throw new Error('OpenAI API call failed')
+    }
+
+    const data = await response.json()
+    return data.content
+  }
+
   const sendMessage = async () => {
     if (!currentInput.trim() || isLoading) return
 
@@ -109,9 +128,16 @@ function App() {
     setIsLoading(true)
 
     try {
-      const prompt = spark.llmPrompt`You are a friendly English conversation tutor helping a Japanese speaker practice English. Respond naturally and conversationally to: "${userMessage.text}". Keep your response encouraging, helpful, and at an appropriate level. Respond in English only.`
-      
-      const aiResponse = await spark.llm(prompt)
+      const aiResponse = await callOpenAI([
+        {
+          role: 'system',
+          content: 'You are a friendly English conversation tutor helping a Japanese speaker practice English. Respond naturally and conversationally. Keep your response encouraging, helpful, and at an appropriate level. Respond in English only.'
+        },
+        {
+          role: 'user',
+          content: userMessage.text
+        }
+      ])
       
       const aiMessage: Message = {
         id: (Date.now() + 1).toString(),
@@ -123,19 +149,23 @@ function App() {
       setMessages(prev => [...prev, aiMessage])
 
       // Generate Japanese explanation
-      const explanationPrompt = spark.llmPrompt`Analyze this English conversation exchange and provide a helpful Japanese explanation:
-
-User said: "${userMessage.text}"
-AI responded: "${aiResponse}"
-
+      const explanationResponse = await callOpenAI([
+        {
+          role: 'system',
+          content: `Analyze this English conversation exchange and provide a helpful Japanese explanation.
+          
 Provide a JSON response with:
 - english: the key English phrase or grammar point to focus on
 - japanese: explanation in Japanese of the meaning, usage, or grammar
 - grammar: optional grammar point explanation in Japanese
 
 Focus on helping the Japanese speaker understand nuances, common expressions, or grammar patterns.`
-
-      const explanationResponse = await spark.llm(explanationPrompt, 'gpt-4o', true)
+        },
+        {
+          role: 'user',
+          content: `User said: "${userMessage.text}"\nAI responded: "${aiResponse}"`
+        }
+      ], true)
       
       try {
         const explanation = JSON.parse(explanationResponse)
