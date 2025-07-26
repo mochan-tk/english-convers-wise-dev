@@ -489,179 +489,186 @@ Focus on helping the Japanese speaker understand nuances, common expressions, or
 
   const ExplanationPanel = () => (
     <div className="flex flex-col h-full">
-      <div className="p-4 border-b border-border">
+      {/* Fixed Header */}
+      <div className="p-4 border-b border-border flex-shrink-0">
         <h2 className="text-xl font-semibold">日本語解説</h2>
         <p className="text-sm text-muted-foreground mt-1">
           会話を始めると、使用した英語の日本語解説がここに表示されます。
         </p>
       </div>
       
-      <ScrollArea className="flex-1 p-4">
-        {explanations.length === 0 ? (
-          <div className="flex items-center justify-center h-full">
-            <div className="text-center">
-              <Chat size={48} className="mx-auto mb-3 text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">
-                英語で会話を始めると解説が表示されます
-              </p>
+      {/* Scrollable Content */}
+      <div className="flex-1 overflow-hidden">
+        <ScrollArea className="h-full p-4">
+          {explanations.length === 0 ? (
+            <div className="flex items-center justify-center h-full">
+              <div className="text-center">
+                <Chat size={48} className="mx-auto mb-3 text-muted-foreground" />
+                <p className="text-sm text-muted-foreground">
+                  英語で会話を始めると解説が表示されます
+                </p>
+              </div>
             </div>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {explanations.map((explanation) => (
-              <Card key={explanation.id} className="p-4 bg-secondary">
-                <div className="space-y-2">
-                  <div className="font-medium text-sm text-primary">
-                    {explanation.english}
+          ) : (
+            <div className="space-y-4">
+              {explanations.map((explanation) => (
+                <Card key={explanation.id} className="p-4 bg-secondary">
+                  <div className="space-y-2">
+                    <div className="font-medium text-sm text-primary">
+                      {explanation.english}
+                    </div>
+                    <div className="text-sm leading-relaxed">
+                      {explanation.japanese}
+                    </div>
+                    {explanation.grammar && (
+                      <>
+                        <Separator className="my-2" />
+                        <div className="text-xs text-muted-foreground">
+                          <strong>文法:</strong> {explanation.grammar}
+                        </div>
+                      </>
+                    )}
                   </div>
-                  <div className="text-sm leading-relaxed">
-                    {explanation.japanese}
-                  </div>
-                  {explanation.grammar && (
-                    <>
-                      <Separator className="my-2" />
-                      <div className="text-xs text-muted-foreground">
-                        <strong>文法:</strong> {explanation.grammar}
-                      </div>
-                    </>
-                  )}
-                </div>
-              </Card>
-            ))}
-          </div>
-        )}
-      </ScrollArea>
+                </Card>
+              ))}
+            </div>
+          )}
+        </ScrollArea>
+      </div>
     </div>
   )
 
   return (
     <>
-      <div className="min-h-screen bg-background flex">
-        {/* Main Chat Area */}
-        <div className="flex-1 flex flex-col">
-          {/* Header */}
-          <div className="bg-card border-b border-border p-4">
-            <div className="flex items-center justify-between">
-              <h1 className="text-2xl font-bold text-foreground">English Chat</h1>
-              <div className="flex items-center gap-2">
-                {/* Realtime Session Control */}
-                {!isSessionActive ? (
-                  <Button
-                    onClick={startRealtimeSession}
-                    disabled={isActivatingSession}
-                    className={`${isActivatingSession ? 'bg-gray-600' : 'bg-red-600'} hover:bg-red-700 text-white`}
-                  >
-                    <CloudLightning size={16} className="mr-2" />
-                    {isActivatingSession ? 'セッション開始中...' : 'リアルタイム開始'}
-                  </Button>
-                ) : (
-                  <Button
-                    onClick={stopRealtimeSession}
-                    variant="destructive"
-                  >
-                    <X size={16} className="mr-2" />
-                    セッション終了
-                  </Button>
-                )}
-                
-                <div className={`px-3 py-1 rounded-full text-sm font-medium ${
-                  isSessionActive 
-                    ? 'bg-green-600 text-white' 
-                    : 'bg-accent text-accent-foreground'
-                }`}>
-                  {isSessionActive ? 'リアルタイム接続中' : '音声入力対応'}
-                </div>
-                {isMobile && (
-                  <Sheet open={isExplanationOpen} onOpenChange={setIsExplanationOpen}>
-                    <SheetTrigger asChild>
-                      <Button variant="outline" size="icon">
-                        <BookOpen size={20} />
-                      </Button>
-                    </SheetTrigger>
-                    <SheetContent side="right" className="w-full sm:w-80">
-                      <SheetHeader>
-                        <SheetTitle>日本語解説</SheetTitle>
-                      </SheetHeader>
-                      <div className="mt-4 h-full">
-                        <ExplanationPanel />
-                      </div>
-                    </SheetContent>
-                  </Sheet>
-                )}
+      <div className="h-screen bg-background flex flex-col">
+        {/* Fixed Header */}
+        <div className="bg-card border-b border-border p-4 flex-shrink-0">
+          <div className="flex items-center justify-between">
+            <h1 className="text-2xl font-bold text-foreground">English Chat</h1>
+            <div className="flex items-center gap-2">
+              {/* Realtime Session Control */}
+              {!isSessionActive ? (
+                <Button
+                  onClick={startRealtimeSession}
+                  disabled={isActivatingSession}
+                  className={`${isActivatingSession ? 'bg-gray-600' : 'bg-red-600'} hover:bg-red-700 text-white`}
+                >
+                  <CloudLightning size={16} className="mr-2" />
+                  {isActivatingSession ? 'セッション開始中...' : 'リアルタイム開始'}
+                </Button>
+              ) : (
+                <Button
+                  onClick={stopRealtimeSession}
+                  variant="destructive"
+                >
+                  <X size={16} className="mr-2" />
+                  セッション終了
+                </Button>
+              )}
+              
+              <div className={`px-3 py-1 rounded-full text-sm font-medium ${
+                isSessionActive 
+                  ? 'bg-green-600 text-white' 
+                  : 'bg-accent text-accent-foreground'
+              }`}>
+                {isSessionActive ? 'リアルタイム接続中' : '音声入力対応'}
               </div>
+              {isMobile && (
+                <Sheet open={isExplanationOpen} onOpenChange={setIsExplanationOpen}>
+                  <SheetTrigger asChild>
+                    <Button variant="outline" size="icon">
+                      <BookOpen size={20} />
+                    </Button>
+                  </SheetTrigger>
+                  <SheetContent side="right" className="w-full sm:w-80">
+                    <SheetHeader>
+                      <SheetTitle>日本語解説</SheetTitle>
+                    </SheetHeader>
+                    <div className="mt-4 h-full">
+                      <ExplanationPanel />
+                    </div>
+                  </SheetContent>
+                </Sheet>
+              )}
             </div>
           </div>
+        </div>
 
-          {/* Chat Messages */}
-          <div className="flex-1 flex flex-col">
-            <ScrollArea className="flex-1 p-4" ref={scrollAreaRef}>
-              {!hasStarted ? (
-                <div className="flex items-center justify-center h-full">
-                  <div className="text-center max-w-md">
-                    <Chat size={64} className="mx-auto mb-4 text-muted-foreground" />
-                    <h2 className="text-xl font-semibold mb-2">英会話を始めましょう！</h2>
-                    <p className="text-muted-foreground">
-                      マイクボタンで音声入力、またはテキストで入力してください。
-                    </p>
+        {/* Main Content Area */}
+        <div className="flex-1 flex min-h-0">
+          {/* Chat Area */}
+          <div className="flex-1 flex flex-col min-h-0">
+            {/* Scrollable Chat Messages */}
+            <div className="flex-1 overflow-hidden">
+              <ScrollArea className="h-full p-4" ref={scrollAreaRef}>
+                {!hasStarted ? (
+                  <div className="flex items-center justify-center h-full">
+                    <div className="text-center max-w-md">
+                      <Chat size={64} className="mx-auto mb-4 text-muted-foreground" />
+                      <h2 className="text-xl font-semibold mb-2">英会話を始めましょう！</h2>
+                      <p className="text-muted-foreground">
+                        マイクボタンで音声入力、またはテキストで入力してください。
+                      </p>
+                    </div>
                   </div>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {messages.map((message) => (
-                    <div
-                      key={message.id}
-                      className={`flex ${message.isUser ? 'justify-end' : 'justify-start'} mb-4`}
-                    >
-                      <div className={`max-w-[85%] sm:max-w-[80%] relative ${message.isUser ? 'ml-auto' : 'mr-auto'}`}>
-                        <div className={`relative p-3 rounded-2xl ${
-                          message.isUser 
-                            ? 'bg-primary text-primary-foreground rounded-br-md' 
-                            : 'bg-card border border-border rounded-bl-md'
-                        }`}>
-                          <div className="flex items-start justify-between gap-2">
-                            <p className="text-sm leading-relaxed">{message.text}</p>
-                            {!message.isUser && (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                className="shrink-0 h-6 w-6 p-0 hover:bg-muted"
-                                onClick={() => speakText(message.text)}
-                              >
-                                <SpeakerHigh size={14} />
-                              </Button>
-                            )}
+                ) : (
+                  <div className="space-y-4">
+                    {messages.map((message) => (
+                      <div
+                        key={message.id}
+                        className={`flex ${message.isUser ? 'justify-end' : 'justify-start'} mb-4`}
+                      >
+                        <div className={`max-w-[85%] sm:max-w-[80%] relative ${message.isUser ? 'ml-auto' : 'mr-auto'}`}>
+                          <div className={`relative p-3 rounded-2xl ${
+                            message.isUser 
+                              ? 'bg-primary text-primary-foreground rounded-br-md' 
+                              : 'bg-card border border-border rounded-bl-md'
+                          }`}>
+                            <div className="flex items-start justify-between gap-2">
+                              <p className="text-sm leading-relaxed">{message.text}</p>
+                              {!message.isUser && (
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="shrink-0 h-6 w-6 p-0 hover:bg-muted"
+                                  onClick={() => speakText(message.text)}
+                                >
+                                  <SpeakerHigh size={14} />
+                                </Button>
+                              )}
+                            </div>
+                            
+                            {/* Speech bubble tail */}
+                            <div className={`absolute bottom-0 w-3 h-3 ${
+                              message.isUser
+                                ? 'right-0 bg-primary transform translate-x-1 translate-y-1 rounded-bl-full'
+                                : 'left-0 bg-card border-l border-b border-border transform -translate-x-1 translate-y-1 rounded-br-full'
+                            }`} />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                    {isLoading && (
+                      <div className="flex justify-start mb-4">
+                        <div className="relative bg-card border border-border rounded-2xl rounded-bl-md p-3">
+                          <div className="flex items-center gap-2">
+                            <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" />
+                            <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '0.1s' }} />
+                            <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
                           </div>
                           
                           {/* Speech bubble tail */}
-                          <div className={`absolute bottom-0 w-3 h-3 ${
-                            message.isUser
-                              ? 'right-0 bg-primary transform translate-x-1 translate-y-1 rounded-bl-full'
-                              : 'left-0 bg-card border-l border-b border-border transform -translate-x-1 translate-y-1 rounded-br-full'
-                          }`} />
+                          <div className="absolute bottom-0 left-0 w-3 h-3 bg-card border-l border-b border-border transform -translate-x-1 translate-y-1 rounded-br-full" />
                         </div>
                       </div>
-                    </div>
-                  ))}
-                  {isLoading && (
-                    <div className="flex justify-start mb-4">
-                      <div className="relative bg-card border border-border rounded-2xl rounded-bl-md p-3">
-                        <div className="flex items-center gap-2">
-                          <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" />
-                          <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '0.1s' }} />
-                          <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
-                        </div>
-                        
-                        {/* Speech bubble tail */}
-                        <div className="absolute bottom-0 left-0 w-3 h-3 bg-card border-l border-b border-border transform -translate-x-1 translate-y-1 rounded-br-full" />
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </ScrollArea>
+                    )}
+                  </div>
+                )}
+              </ScrollArea>
+            </div>
 
-            {/* Input Area */}
-            <div className="p-4 bg-card border-t border-border">
+            {/* Fixed Input Area */}
+            <div className="p-4 bg-card border-t border-border flex-shrink-0">
               {isSessionActive ? (
                 /* Realtime Mode Input */
                 <div className="flex gap-2">
@@ -732,14 +739,14 @@ Focus on helping the Japanese speaker understand nuances, common expressions, or
               )}
             </div>
           </div>
-        </div>
 
-        {/* Desktop Explanation Panel */}
-        {!isMobile && (
-          <div className="w-80 bg-card border-l border-border">
-            <ExplanationPanel />
-          </div>
-        )}
+          {/* Desktop Explanation Panel */}
+          {!isMobile && (
+            <div className="w-80 bg-card border-l border-border flex-shrink-0">
+              <ExplanationPanel />
+            </div>
+          )}
+        </div>
       </div>
       <Toaster position="top-right" />
     </>
