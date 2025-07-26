@@ -6,7 +6,7 @@ import { Card } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
-import { Microphone, PaperPlaneTilt, Chat, SpeakerHigh, BookOpen } from '@phosphor-icons/react'
+import { Microphone, PaperPlaneTilt, Chat, SpeakerHigh, BookOpen, CloudLightning, X } from '@phosphor-icons/react'
 import { toast, Toaster } from 'sonner'
 
 interface Message {
@@ -31,8 +31,17 @@ function App() {
   const [isLoading, setIsLoading] = useState(false)
   const [hasStarted, setHasStarted] = useState(false)
   const [isExplanationOpen, setIsExplanationOpen] = useState(false)
+  
+  // Realtime API states
+  const [isSessionActive, setIsSessionActive] = useState(false)
+  const [isActivatingSession, setIsActivatingSession] = useState(false)
+  const [dataChannel, setDataChannel] = useState<RTCDataChannel | null>(null)
+  const [events, setEvents] = useState<any[]>([])
+  
   const scrollAreaRef = useRef<HTMLDivElement>(null)
   const recognitionRef = useRef<any>(null)
+  const peerConnection = useRef<RTCPeerConnection | null>(null)
+  const audioElement = useRef<HTMLAudioElement | null>(null)
   const isMobile = useIsMobile()
 
   useEffect(() => {
@@ -46,6 +55,58 @@ function App() {
       scrollAreaRef.current.scrollTop = scrollAreaRef.current.scrollHeight
     }
   }, [messages])
+
+  // Attach event listeners to the data channel when a new one is created
+  useEffect(() => {
+    if (dataChannel) {
+      // Append new server events to the list
+      dataChannel.addEventListener('message', (e) => {
+        const event = JSON.parse(e.data)
+        if (!event.timestamp) {
+          event.timestamp = new Date().toLocaleTimeString()
+        }
+        setEvents((prev) => [event, ...prev])
+
+        // Handle conversation responses for our chat UI
+        if (event.type === 'response.done' && event.response?.output) {
+          event.response.output.forEach((output: any) => {
+            if (output.type === 'message' && output.content) {
+              const textContent = output.content
+                .filter((c: any) => c.type === 'text')
+                .map((c: any) => c.text)
+                .join('')
+              
+              if (textContent) {
+                const aiMessage: Message = {
+                  id: Date.now().toString(),
+                  text: textContent,
+                  isUser: false,
+                  timestamp: Date.now()
+                }
+                setMessages(prev => [...prev, aiMessage])
+                
+                // Generate explanation for realtime response
+                generateExplanationForMessage(textContent, 'Realtime conversation')
+              }
+            }
+          })
+        }
+      })
+
+      // Set session active when the data channel is opened
+      dataChannel.addEventListener('open', () => {
+        setIsSessionActive(true)
+        setEvents([])
+        setIsActivatingSession(false)
+        toast.success('リアルタイムセッションが開始されました')
+      })
+
+      dataChannel.addEventListener('close', () => {
+        setIsSessionActive(false)
+        toast.info('リアルタイムセッションが終了しました')
+      })
+    }
+  }, [dataChannel])
 
   const initSpeechRecognition = () => {
     if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
@@ -111,6 +172,163 @@ function App() {
 
     const data = await response.json()
     return data.content
+  }
+
+  // Start realtime session
+  const startRealtimeSession = async () => {
+    if (isActivatingSession) return
+
+    setIsActivatingSession(true)
+    
+    try {
+      // Get a session token for OpenAI Realtime API
+      const tokenResponse = await fetch('/api/token')
+      const data = await tokenResponse.json()
+      const EPHEMERAL_KEY = data.client_secret.value
+
+      // Create a peer connection
+      const pc = new RTCPeerConnection()
+
+      // Set up to play remote audio from the model
+      audioElement.current = document.createElement('audio')
+      audioElement.current.autoplay = true
+      pc.ontrack = (e) => {
+        if (audioElement.current) {
+          audioElement.current.srcObject = e.streams[0]
+        }
+      }
+
+      // Add local audio track for microphone input in the browser
+      const ms = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+      })
+      pc.addTrack(ms.getTracks()[0])
+
+      // Set up data channel for sending and receiving events
+      const dc = pc.createDataChannel('oai-events')
+      setDataChannel(dc)
+
+      // Start the session using the Session Description Protocol (SDP)
+      const offer = await pc.createOffer()
+      await pc.setLocalDescription(offer)
+
+      const baseUrl = 'https://api.openai.com/v1/realtime'
+      const model = 'gpt-4o-realtime-preview-2024-12-17'
+      const sdpResponse = await fetch(`${baseUrl}?model=${model}`, {
+        method: 'POST',
+        body: offer.sdp,
+        headers: {
+          Authorization: `Bearer ${EPHEMERAL_KEY}`,
+          'Content-Type': 'application/sdp',
+        },
+      })
+
+      const answer: RTCSessionDescriptionInit = {
+        type: 'answer' as RTCSdpType,
+        sdp: await sdpResponse.text(),
+      }
+      await pc.setRemoteDescription(answer)
+
+      peerConnection.current = pc
+      setIsActivatingSession(false)
+    } catch (error) {
+      console.error('Failed to start realtime session:', error)
+      toast.error('リアルタイムセッションの開始に失敗しました')
+      setIsActivatingSession(false)
+    }
+  }
+
+  // Stop realtime session
+  const stopRealtimeSession = () => {
+    if (dataChannel) {
+      dataChannel.close()
+    }
+
+    if (peerConnection.current) {
+      peerConnection.current.getSenders().forEach((sender) => {
+        if (sender.track) {
+          sender.track.stop()
+        }
+      })
+      peerConnection.current.close()
+    }
+
+    setIsSessionActive(false)
+    setDataChannel(null)
+    peerConnection.current = null
+    
+    if (audioElement.current) {
+      audioElement.current.srcObject = null
+    }
+  }
+
+  // Send a message to the realtime model
+  const sendRealtimeEvent = (message: any) => {
+    if (dataChannel && dataChannel.readyState === 'open') {
+      const timestamp = new Date().toLocaleTimeString()
+      message.event_id = message.event_id || crypto.randomUUID()
+
+      dataChannel.send(JSON.stringify(message))
+
+      if (!message.timestamp) {
+        message.timestamp = timestamp
+      }
+      setEvents((prev) => [message, ...prev])
+    } else {
+      console.error('Failed to send message - no data channel available', message)
+    }
+  }
+
+  // Send a text message to the realtime model
+  const sendRealtimeTextMessage = (messageText: string) => {
+    const event = {
+      type: 'conversation.item.create',
+      item: {
+        type: 'message',
+        role: 'user',
+        content: [
+          {
+            type: 'input_text',
+            text: messageText,
+          },
+        ],
+      },
+    }
+
+    sendRealtimeEvent(event)
+    sendRealtimeEvent({ type: 'response.create' })
+  }
+
+  // Generate explanation for a message
+  const generateExplanationForMessage = async (aiText: string, userText: string) => {
+    try {
+      const explanationResponse = await callOpenAI([
+        {
+          role: 'system',
+          content: `Analyze this English conversation exchange and provide a helpful Japanese explanation.
+          
+Provide a JSON response with:
+- english: the key English phrase or grammar point to focus on
+- japanese: explanation in Japanese of the meaning, usage, or grammar
+- grammar: optional grammar point explanation in Japanese
+
+Focus on helping the Japanese speaker understand nuances, common expressions, or grammar patterns.`
+        },
+        {
+          role: 'user',
+          content: `User said: "${userText}"\nAI responded: "${aiText}"`
+        }
+      ], true)
+      
+      const explanation = JSON.parse(explanationResponse)
+      const newExplanation: Explanation = {
+        id: Date.now().toString(),
+        ...explanation
+      }
+      setExplanations(prev => [newExplanation, ...prev])
+    } catch (e) {
+      console.error('Failed to generate explanation:', e)
+    }
   }
 
   const sendMessage = async () => {
@@ -259,8 +477,32 @@ Focus on helping the Japanese speaker understand nuances, common expressions, or
             <div className="flex items-center justify-between">
               <h1 className="text-2xl font-bold text-foreground">English Chat</h1>
               <div className="flex items-center gap-2">
-                <div className="bg-accent text-accent-foreground px-3 py-1 rounded-full text-sm font-medium">
-                  音声入力対応
+                {/* Realtime Session Control */}
+                {!isSessionActive ? (
+                  <Button
+                    onClick={startRealtimeSession}
+                    disabled={isActivatingSession}
+                    className={`${isActivatingSession ? 'bg-gray-600' : 'bg-red-600'} hover:bg-red-700 text-white`}
+                  >
+                    <CloudLightning size={16} className="mr-2" />
+                    {isActivatingSession ? 'セッション開始中...' : 'リアルタイム開始'}
+                  </Button>
+                ) : (
+                  <Button
+                    onClick={stopRealtimeSession}
+                    variant="destructive"
+                  >
+                    <X size={16} className="mr-2" />
+                    セッション終了
+                  </Button>
+                )}
+                
+                <div className={`px-3 py-1 rounded-full text-sm font-medium ${
+                  isSessionActive 
+                    ? 'bg-green-600 text-white' 
+                    : 'bg-accent text-accent-foreground'
+                }`}>
+                  {isSessionActive ? 'リアルタイム接続中' : '音声入力対応'}
                 </div>
                 {isMobile && (
                   <Sheet open={isExplanationOpen} onOpenChange={setIsExplanationOpen}>
@@ -353,32 +595,74 @@ Focus on helping the Japanese speaker understand nuances, common expressions, or
 
             {/* Input Area */}
             <div className="p-4 bg-card border-t border-border">
-              <div className="flex gap-2">
-                <Input
-                  value={currentInput}
-                  onChange={(e) => setCurrentInput(e.target.value)}
-                  onKeyPress={handleKeyPress}
-                  placeholder="英語でメッセージを入力..."
-                  className="flex-1"
-                  disabled={isLoading}
-                />
-                <Button
-                  onClick={isRecording ? stopRecording : startRecording}
-                  variant={isRecording ? "destructive" : "outline"}
-                  size="icon"
-                  className={`${isRecording ? "animate-pulse" : ""} shrink-0`}
-                >
-                  <Microphone size={20} />
-                </Button>
-                <Button
-                  onClick={sendMessage}
-                  disabled={!currentInput.trim() || isLoading}
-                  className="bg-accent hover:bg-accent/90 shrink-0"
-                  size="icon"
-                >
-                  <PaperPlaneTilt size={20} />
-                </Button>
-              </div>
+              {isSessionActive ? (
+                /* Realtime Mode Input */
+                <div className="flex gap-2">
+                  <Input
+                    value={currentInput}
+                    onChange={(e) => setCurrentInput(e.target.value)}
+                    onKeyPress={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey && currentInput.trim()) {
+                        e.preventDefault()
+                        sendRealtimeTextMessage(currentInput.trim())
+                        setCurrentInput('')
+                      }
+                    }}
+                    placeholder="リアルタイムモード: 音声またはテキストで会話..."
+                    className="flex-1"
+                  />
+                  <Button
+                    onClick={isRecording ? stopRecording : startRecording}
+                    variant={isRecording ? "destructive" : "outline"}
+                    size="icon"
+                    className={`${isRecording ? "animate-pulse" : ""} shrink-0`}
+                    title="従来の音声認識を使用"
+                  >
+                    <Microphone size={20} />
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      if (currentInput.trim()) {
+                        sendRealtimeTextMessage(currentInput.trim())
+                        setCurrentInput('')
+                      }
+                    }}
+                    disabled={!currentInput.trim()}
+                    className="bg-green-600 hover:bg-green-700 text-white shrink-0"
+                    size="icon"
+                  >
+                    <PaperPlaneTilt size={20} />
+                  </Button>
+                </div>
+              ) : (
+                /* Traditional Mode Input */
+                <div className="flex gap-2">
+                  <Input
+                    value={currentInput}
+                    onChange={(e) => setCurrentInput(e.target.value)}
+                    onKeyPress={handleKeyPress}
+                    placeholder="英語でメッセージを入力..."
+                    className="flex-1"
+                    disabled={isLoading}
+                  />
+                  <Button
+                    onClick={isRecording ? stopRecording : startRecording}
+                    variant={isRecording ? "destructive" : "outline"}
+                    size="icon"
+                    className={`${isRecording ? "animate-pulse" : ""} shrink-0`}
+                  >
+                    <Microphone size={20} />
+                  </Button>
+                  <Button
+                    onClick={sendMessage}
+                    disabled={!currentInput.trim() || isLoading}
+                    className="bg-accent hover:bg-accent/90 shrink-0"
+                    size="icon"
+                  >
+                    <PaperPlaneTilt size={20} />
+                  </Button>
+                </div>
+              )}
             </div>
           </div>
         </div>
