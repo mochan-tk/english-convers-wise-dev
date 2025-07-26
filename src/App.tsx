@@ -66,9 +66,40 @@ function App() {
           event.timestamp = new Date().toLocaleTimeString()
         }
         setEvents((prev) => [event, ...prev])
+        
+        // Debug: Log realtime events
+        console.log('Realtime event:', event.type, event)
 
-        // Handle conversation responses for our chat UI
-        if (event.type === 'response.done' && event.response?.output) {
+        // Handle different types of realtime events
+        if (event.type === 'response.audio_transcript.done') {
+          // AI's audio response transcript
+          const transcript = event.transcript
+          if (transcript && transcript.trim()) {
+            const aiMessage: Message = {
+              id: `ai-${Date.now()}`,
+              text: transcript,
+              isUser: false,
+              timestamp: Date.now()
+            }
+            setMessages(prev => [...prev, aiMessage])
+            
+            // Generate explanation for realtime response
+            generateExplanationForMessage(transcript, 'リアルタイム音声会話')
+          }
+        } else if (event.type === 'conversation.item.input_audio_transcription.completed') {
+          // User's audio input transcript
+          const transcript = event.transcript
+          if (transcript && transcript.trim()) {
+            const userMessage: Message = {
+              id: `user-${Date.now()}`,
+              text: transcript,
+              isUser: true,
+              timestamp: Date.now()
+            }
+            setMessages(prev => [...prev, userMessage])
+          }
+        } else if (event.type === 'response.done' && event.response?.output) {
+          // Fallback: Handle text-based responses
           event.response.output.forEach((output: any) => {
             if (output.type === 'message' && output.content) {
               const textContent = output.content
@@ -76,9 +107,9 @@ function App() {
                 .map((c: any) => c.text)
                 .join('')
               
-              if (textContent) {
+              if (textContent && textContent.trim()) {
                 const aiMessage: Message = {
-                  id: Date.now().toString(),
+                  id: `ai-text-${Date.now()}`,
                   text: textContent,
                   isUser: false,
                   timestamp: Date.now()
@@ -86,7 +117,7 @@ function App() {
                 setMessages(prev => [...prev, aiMessage])
                 
                 // Generate explanation for realtime response
-                generateExplanationForMessage(textContent, 'Realtime conversation')
+                generateExplanationForMessage(textContent, 'リアルタイムテキスト会話')
               }
             }
           })
@@ -99,6 +130,32 @@ function App() {
         setEvents([])
         setIsActivatingSession(false)
         toast.success('リアルタイムセッションが開始されました')
+        
+        // Configure session for audio transcription
+        const sessionConfig = {
+          type: 'session.update',
+          session: {
+            modalities: ['text', 'audio'],
+            instructions: 'You are a helpful English conversation tutor. Speak naturally and help the user practice English. Always respond in English.',
+            voice: 'verse',
+            input_audio_format: 'pcm16',
+            output_audio_format: 'pcm16',
+            input_audio_transcription: {
+              model: 'whisper-1'
+            },
+            turn_detection: {
+              type: 'server_vad',
+              threshold: 0.5,
+              prefix_padding_ms: 300,
+              silence_duration_ms: 500
+            }
+          }
+        }
+        
+        // Send session configuration
+        if (dataChannel && dataChannel.readyState === 'open') {
+          dataChannel.send(JSON.stringify(sessionConfig))
+        }
       })
 
       dataChannel.addEventListener('close', () => {
@@ -281,6 +338,16 @@ function App() {
 
   // Send a text message to the realtime model
   const sendRealtimeTextMessage = (messageText: string) => {
+    // Add user message to chat immediately
+    const userMessage: Message = {
+      id: `user-text-${Date.now()}`,
+      text: messageText,
+      isUser: true,
+      timestamp: Date.now()
+    }
+    setMessages(prev => [...prev, userMessage])
+
+    // Send to realtime API
     const event = {
       type: 'conversation.item.create',
       item: {
