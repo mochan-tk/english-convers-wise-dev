@@ -269,8 +269,8 @@ function App() {
       const offer = await pc.createOffer()
       await pc.setLocalDescription(offer)
 
-      const baseUrl = 'https://api.openai.com/v1/realtime'
-      const model = 'gpt-4o-realtime-preview-2024-12-17'
+      const baseUrl = import.meta.env.VITE_REALTIME_BASE_URL
+      const model = import.meta.env.VITE_REALTIME_MODEL
       const sdpResponse = await fetch(`${baseUrl}?model=${model}`, {
         method: 'POST',
         body: offer.sdp,
