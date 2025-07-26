@@ -1,0 +1,368 @@
+import { useState, useRef, useEffect } from 'react'
+import { useKV } from '@github/spark/hooks'
+import { useIsMobile } from '@/hooks/use-mobile'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Card } from '@/components/ui/card'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { Separator } from '@/components/ui/separator'
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
+import { Microphone, PaperPlaneTilt, Chat, SpeakerHigh, BookOpen } from '@phosphor-icons/react'
+import { toast, Toaster } from 'sonner'
+
+interface Message {
+  id: string
+  text: string
+  isUser: boolean
+  timestamp: number
+}
+
+interface Explanation {
+  id: string
+  english: string
+  japanese: string
+  grammar?: string
+}
+
+function App() {
+  const [messages, setMessages] = useKV<Message[]>('chat-messages', [])
+  const [explanations, setExplanations] = useKV<Explanation[]>('explanations', [])
+  const [currentInput, setCurrentInput] = useState('')
+  const [isRecording, setIsRecording] = useState(false)
+  const [isLoading, setIsLoading] = useState(false)
+  const [hasStarted, setHasStarted] = useState(false)
+  const [isExplanationOpen, setIsExplanationOpen] = useState(false)
+  const scrollAreaRef = useRef<HTMLDivElement>(null)
+  const recognitionRef = useRef<SpeechRecognition | null>(null)
+  const isMobile = useIsMobile()
+
+  useEffect(() => {
+    if (messages.length > 0) {
+      setHasStarted(true)
+    }
+  }, [messages])
+
+  useEffect(() => {
+    if (scrollAreaRef.current) {
+      scrollAreaRef.current.scrollTop = scrollAreaRef.current.scrollHeight
+    }
+  }, [messages])
+
+  const initSpeechRecognition = () => {
+    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+      const recognition = new SpeechRecognition()
+      recognition.lang = 'en-US'
+      recognition.continuous = false
+      recognition.interimResults = false
+
+      recognition.onresult = (event) => {
+        const transcript = event.results[0][0].transcript
+        setCurrentInput(transcript)
+        setIsRecording(false)
+      }
+
+      recognition.onerror = () => {
+        setIsRecording(false)
+        toast.error('音声認識に失敗しました。もう一度お試しください。')
+      }
+
+      recognition.onend = () => {
+        setIsRecording(false)
+      }
+
+      return recognition
+    }
+    return null
+  }
+
+  const startRecording = () => {
+    const recognition = initSpeechRecognition()
+    if (recognition) {
+      recognitionRef.current = recognition
+      setIsRecording(true)
+      recognition.start()
+    } else {
+      toast.error('お使いのブラウザは音声認識に対応していません。')
+    }
+  }
+
+  const stopRecording = () => {
+    if (recognitionRef.current) {
+      recognitionRef.current.stop()
+      setIsRecording(false)
+    }
+  }
+
+  const sendMessage = async () => {
+    if (!currentInput.trim() || isLoading) return
+
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      text: currentInput.trim(),
+      isUser: true,
+      timestamp: Date.now()
+    }
+
+    setMessages(prev => [...prev, userMessage])
+    setCurrentInput('')
+    setIsLoading(true)
+
+    try {
+      const prompt = spark.llmPrompt`You are a friendly English conversation tutor helping a Japanese speaker practice English. Respond naturally and conversationally to: "${userMessage.text}". Keep your response encouraging, helpful, and at an appropriate level. Respond in English only.`
+      
+      const aiResponse = await spark.llm(prompt)
+      
+      const aiMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        text: aiResponse,
+        isUser: false,
+        timestamp: Date.now()
+      }
+
+      setMessages(prev => [...prev, aiMessage])
+
+      // Generate Japanese explanation
+      const explanationPrompt = spark.llmPrompt`Analyze this English conversation exchange and provide a helpful Japanese explanation:
+
+User said: "${userMessage.text}"
+AI responded: "${aiResponse}"
+
+Provide a JSON response with:
+- english: the key English phrase or grammar point to focus on
+- japanese: explanation in Japanese of the meaning, usage, or grammar
+- grammar: optional grammar point explanation in Japanese
+
+Focus on helping the Japanese speaker understand nuances, common expressions, or grammar patterns.`
+
+      const explanationResponse = await spark.llm(explanationPrompt, 'gpt-4o', true)
+      
+      try {
+        const explanation = JSON.parse(explanationResponse)
+        const newExplanation: Explanation = {
+          id: Date.now().toString(),
+          ...explanation
+        }
+        setExplanations(prev => [newExplanation, ...prev])
+      } catch (e) {
+        console.error('Failed to parse explanation:', e)
+      }
+
+    } catch (error) {
+      toast.error('応答の生成に失敗しました。もう一度お試しください。')
+      console.error('Error generating response:', error)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      sendMessage()
+    }
+  }
+
+  const speakText = (text: string) => {
+    if ('speechSynthesis' in window) {
+      const utterance = new SpeechSynthesisUtterance(text)
+      utterance.lang = 'en-US'
+      utterance.rate = 0.8
+      speechSynthesis.speak(utterance)
+    }
+  }
+
+  const ExplanationPanel = () => (
+    <div className="flex flex-col h-full">
+      <div className="p-4 border-b border-border">
+        <h2 className="text-xl font-semibold">日本語解説</h2>
+        <p className="text-sm text-muted-foreground mt-1">
+          会話を始めると、使用した英語の日本語解説がここに表示されます。
+        </p>
+      </div>
+      
+      <ScrollArea className="flex-1 p-4">
+        {explanations.length === 0 ? (
+          <div className="flex items-center justify-center h-full">
+            <div className="text-center">
+              <Chat size={48} className="mx-auto mb-3 text-muted-foreground" />
+              <p className="text-sm text-muted-foreground">
+                英語で会話を始めると解説が表示されます
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {explanations.map((explanation) => (
+              <Card key={explanation.id} className="p-4 bg-secondary">
+                <div className="space-y-2">
+                  <div className="font-medium text-sm text-primary">
+                    {explanation.english}
+                  </div>
+                  <div className="text-sm leading-relaxed">
+                    {explanation.japanese}
+                  </div>
+                  {explanation.grammar && (
+                    <>
+                      <Separator className="my-2" />
+                      <div className="text-xs text-muted-foreground">
+                        <strong>文法:</strong> {explanation.grammar}
+                      </div>
+                    </>
+                  )}
+                </div>
+              </Card>
+            ))}
+          </div>
+        )}
+      </ScrollArea>
+    </div>
+  )
+
+  return (
+    <>
+      <div className="min-h-screen bg-background flex">
+        {/* Main Chat Area */}
+        <div className="flex-1 flex flex-col">
+          {/* Header */}
+          <div className="bg-card border-b border-border p-4">
+            <div className="flex items-center justify-between">
+              <h1 className="text-2xl font-bold text-foreground">English Chat</h1>
+              <div className="flex items-center gap-2">
+                <div className="bg-accent text-accent-foreground px-3 py-1 rounded-full text-sm font-medium">
+                  音声入力対応
+                </div>
+                {isMobile && (
+                  <Sheet open={isExplanationOpen} onOpenChange={setIsExplanationOpen}>
+                    <SheetTrigger asChild>
+                      <Button variant="outline" size="icon">
+                        <BookOpen size={20} />
+                      </Button>
+                    </SheetTrigger>
+                    <SheetContent side="right" className="w-full sm:w-80">
+                      <SheetHeader>
+                        <SheetTitle>日本語解説</SheetTitle>
+                      </SheetHeader>
+                      <div className="mt-4 h-full">
+                        <ExplanationPanel />
+                      </div>
+                    </SheetContent>
+                  </Sheet>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Chat Messages */}
+          <div className="flex-1 flex flex-col">
+            <ScrollArea className="flex-1 p-4" ref={scrollAreaRef}>
+              {!hasStarted ? (
+                <div className="flex items-center justify-center h-full">
+                  <div className="text-center max-w-md">
+                    <Chat size={64} className="mx-auto mb-4 text-muted-foreground" />
+                    <h2 className="text-xl font-semibold mb-2">英会話を始めましょう！</h2>
+                    <p className="text-muted-foreground">
+                      マイクボタンで音声入力、またはテキストで入力してください。
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {messages.map((message) => (
+                    <div
+                      key={message.id}
+                      className={`flex ${message.isUser ? 'justify-end' : 'justify-start'} mb-4`}
+                    >
+                      <div className={`max-w-[85%] sm:max-w-[80%] relative ${message.isUser ? 'ml-auto' : 'mr-auto'}`}>
+                        <div className={`relative p-3 rounded-2xl ${
+                          message.isUser 
+                            ? 'bg-primary text-primary-foreground rounded-br-md' 
+                            : 'bg-card border border-border rounded-bl-md'
+                        }`}>
+                          <div className="flex items-start justify-between gap-2">
+                            <p className="text-sm leading-relaxed">{message.text}</p>
+                            {!message.isUser && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="shrink-0 h-6 w-6 p-0 hover:bg-muted"
+                                onClick={() => speakText(message.text)}
+                              >
+                                <SpeakerHigh size={14} />
+                              </Button>
+                            )}
+                          </div>
+                          
+                          {/* Speech bubble tail */}
+                          <div className={`absolute bottom-0 w-3 h-3 ${
+                            message.isUser
+                              ? 'right-0 bg-primary transform translate-x-1 translate-y-1 rounded-bl-full'
+                              : 'left-0 bg-card border-l border-b border-border transform -translate-x-1 translate-y-1 rounded-br-full'
+                          }`} />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  {isLoading && (
+                    <div className="flex justify-start mb-4">
+                      <div className="relative bg-card border border-border rounded-2xl rounded-bl-md p-3">
+                        <div className="flex items-center gap-2">
+                          <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" />
+                          <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '0.1s' }} />
+                          <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
+                        </div>
+                        
+                        {/* Speech bubble tail */}
+                        <div className="absolute bottom-0 left-0 w-3 h-3 bg-card border-l border-b border-border transform -translate-x-1 translate-y-1 rounded-br-full" />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </ScrollArea>
+
+            {/* Input Area */}
+            <div className="p-4 bg-card border-t border-border">
+              <div className="flex gap-2">
+                <Input
+                  value={currentInput}
+                  onChange={(e) => setCurrentInput(e.target.value)}
+                  onKeyPress={handleKeyPress}
+                  placeholder="英語でメッセージを入力..."
+                  className="flex-1"
+                  disabled={isLoading}
+                />
+                <Button
+                  onClick={isRecording ? stopRecording : startRecording}
+                  variant={isRecording ? "destructive" : "outline"}
+                  size="icon"
+                  className={`${isRecording ? "animate-pulse" : ""} shrink-0`}
+                >
+                  <Microphone size={20} />
+                </Button>
+                <Button
+                  onClick={sendMessage}
+                  disabled={!currentInput.trim() || isLoading}
+                  className="bg-accent hover:bg-accent/90 shrink-0"
+                  size="icon"
+                >
+                  <PaperPlaneTilt size={20} />
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Desktop Explanation Panel */}
+        {!isMobile && (
+          <div className="w-80 bg-card border-l border-border">
+            <ExplanationPanel />
+          </div>
+        )}
+      </div>
+      <Toaster position="top-right" />
+    </>
+  )
+}
+
+export default App
